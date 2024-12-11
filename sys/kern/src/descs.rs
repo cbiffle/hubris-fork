@@ -98,6 +98,8 @@ pub struct RegionDesc {
     pub size: u32,
     /// Flags describing what can be done with this region.
     pub attributes: RegionAttributes,
+    /// Architecture-specific additional data to make context switch cheaper.
+    pub arch_data: crate::arch::RegionDescExt,
 }
 
 impl RegionDesc {
