@@ -1221,7 +1221,10 @@ unsafe extern "C" fn pendsv_entry() {
             // Note that it's ok if proposed and current alias.
             let proposed = unsafe { &*proposed };
 
-            if proposed.priority().is_more_important_than(current.priority()) {
+            if proposed
+                .priority()
+                .is_more_important_than(current.priority())
+            {
                 // No need to invoke the scheduler. Let's go.
                 apply_memory_protection(proposed);
                 unsafe {
