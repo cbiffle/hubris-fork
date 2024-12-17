@@ -73,7 +73,6 @@
 use core::arch::{self, global_asm};
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 
-use serde::{Deserialize, Serialize};
 use zerocopy::FromBytes;
 
 use crate::atomic::AtomicExt;
@@ -351,7 +350,8 @@ pub fn reinitialize(task: &mut task::Task) {
 }
 
 #[cfg(any(armv6m, armv7m))]
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
 pub struct RegionDescExt {
     rasr: u32,
     rbar: u32,
@@ -482,15 +482,19 @@ pub fn apply_memory_protection(task: &task::Task) {
     }
 }
 
-#[cfg(any(armv8m))]
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+/// ARMv8-M specific MPU accelerator data.
+#[cfg(armv8m)]
+#[derive(Copy, Clone, Debug)]
 pub struct RegionDescExt {
+    /// This is the contents of the RLAR register, but without the enable bit
+    /// set. We write that first, and then set the enable bit.
     rlar_disabled: u32,
+
     rbar: u32,
     mair: u32,
 }
 
-#[cfg(any(armv8m))]
+#[cfg(armv8m)]
 pub const fn compute_region_extension_data(
     base: u32,
     size: u32,
@@ -531,7 +535,7 @@ pub const fn compute_region_extension_data(
     // RLAR = our upper bound; note that enable (bit 0) is not set, because
     // it's possible to hard-fault midway through region configuration if
     // address and size are incompatible while the region is enabled.
-    let rlar_disabled = (base + size - 32); // upper bound
+    let rlar_disabled = base + size - 32; // upper bound
 
     // RBAR = the base
     let rbar = (xn as u32)
@@ -562,7 +566,7 @@ pub fn apply_memory_protection(task: &task::Task) {
         let ext = &region.arch_data;
 
         unsafe {
-            let rlar_disabled = ext.rlar_disabled | (index as u32) << 1; // AttrIdx
+            let rlar_disabled = ext.rlar_disabled | (i as u32) << 1; // AttrIdx
             mpu.rnr.write(rnr);
             mpu.rlar.write(rlar_disabled); // configure but leave disabled
             if rnr < 4 {
