@@ -13,11 +13,10 @@ use abi::{
 use zerocopy::FromBytes;
 
 use crate::descs::{
-    Priority, RegionAttributes, RegionDesc, TaskDesc, TaskFlags,
-    REGIONS_PER_TASK,
+    Priority, RegionAttributes, TaskDesc, TaskFlags, REGIONS_PER_TASK,
 };
 use crate::err::UserError;
-use crate::startup::HUBRIS_FAULT_NOTIFICATION;
+use crate::startup::{RegionIndex, HUBRIS_FAULT_NOTIFICATION};
 use crate::time::Timestamp;
 use crate::umem::USlice;
 
@@ -219,6 +218,7 @@ impl Task {
         // Delegate the actual tests to the kerncore crate, but with our
         // attribute-sensing customization:
         kerncore::can_access(slice, self.region_table(), |region| {
+            let region = region.get_desc();
             region.attributes.contains(desired)
                 && !region.attributes.intersects(forbidden)
         })
@@ -331,7 +331,7 @@ impl Task {
     }
 
     /// Returns a reference to the task's memory region descriptor table.
-    pub fn region_table(&self) -> &[&'static RegionDesc; REGIONS_PER_TASK] {
+    pub fn region_table(&self) -> &[RegionIndex; REGIONS_PER_TASK] {
         &self.descriptor.regions
     }
 

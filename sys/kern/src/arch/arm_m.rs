@@ -70,6 +70,8 @@
 //! context switches, and just always do full save/restore, eliminating PendSV.
 //! We'll see.
 
+use kerncore::MemoryRegion;
+
 use core::arch::{self, global_asm};
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 
@@ -313,8 +315,8 @@ pub fn reinitialize(task: &mut task::Task) {
         // occur, don't crash the entire system, since this is a diagnostic tool
         // -- just skip filling the stack.
         if let Ok(mut uslice) = USlice::<u32>::from_raw(
-            region.base as usize,
-            (initial_stack - frame_size - region.base as usize) >> 2,
+            region.base_addr(),
+            (initial_stack - frame_size - region.base_addr()) >> 2,
         ) {
             // This one, we're unwrapping rather than tolerating failure. This
             // is because try_write failing would indicate an invalid region
@@ -467,7 +469,7 @@ pub fn apply_memory_protection(task: &task::Task) {
     }
 
     for (i, region) in task.region_table().iter().enumerate() {
-        let data = region.arch_data;
+        let data = region.get_ext();
         // With the MPU off, there are no particular constraints on the order in
         // which we write these fields.
         //
@@ -592,9 +594,8 @@ pub fn apply_memory_protection(task: &task::Task) {
     let mut mairs = [0; 8];
 
     for (i, region) in task.region_table().iter().enumerate() {
+        let ext = region.get_ext();
         let rnr = i as u32;
-
-        let ext = &region.arch_data;
 
         mairs[i] = ext.mair;
 
