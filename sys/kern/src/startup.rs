@@ -49,7 +49,8 @@ pub const HUBRIS_FAULT_NOTIFICATION: u32 = 1;
 pub unsafe fn start_kernel(tick_divisor: u32) -> ! {
     // Set our clock frequency so debuggers can find it as needed
     //
-    // Safety: TODO it is not clear that this operation needs to be unsafe.
+    // Safety: Due to our own safety contract, we're calling this a single time
+    // early in boot, so it's ok.
     unsafe {
         crate::arch::set_clock_freq(tick_divisor);
     }

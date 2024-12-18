@@ -274,11 +274,22 @@ const INITIAL_FPSCR: u32 = 0;
 /// that support it) (and that bit 6 and bit 0 can always be set).
 const EXC_RETURN_CONST: u32 = 0xFFFFFFED;
 
-// Because debuggers need to know the clock frequency to set the SWO clock
-// scaler that enables ITM, and because ITM is particularly useful when
-// debugging boot failures, this should be set as early in boot as it can
-// be.
-pub unsafe fn set_clock_freq(tick_divisor: u32) {
+/// Sets the kernel's notion of our clock frequency measured in kHz.
+///
+/// This is used for two broad classes of things. First, it's used to initialize
+/// and manage the SysTick timer that provides the kernel timer interrupt.
+///
+/// Second, it's read by debuggers, which often need to know the clock frequency
+/// to properly initialize ITM, if you're using SWO.
+///
+/// This is called quite early in boot by the architecture-independent startup
+/// code, and should only be called once.
+///
+/// # Safety
+///
+/// This is safe to call once, early in boot, before `start_first_task`. It
+/// should not be called again.
+pub(crate) unsafe fn set_clock_freq(tick_divisor: u32) {
     CLOCK_FREQ_KHZ.store(tick_divisor, Ordering::Relaxed);
 }
 
