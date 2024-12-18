@@ -10,14 +10,14 @@ use crate::task::Task;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-/// Tracks when a mutable reference to the task table is floating around in
-/// kernel code, to prevent production of a second one. This forms a sort of
-/// ad-hoc Mutex around the task table.
+/// Tracks when there are _no_ mutable references to the task table floating
+/// around in kernel code, indicating that we can produce a new one. This forms
+/// a sort of ad-hoc Mutex around the task table.
 ///
-/// Notice that this begins life initialized to `true`. This prevents use of
+/// Notice that this begins life initialized to `false`. This prevents use of
 /// `with_task_table` et al before the kernel is properly started. We set it to
-/// `false` late in `start_kernel`.
-static TASK_TABLE_IN_USE: AtomicBool = AtomicBool::new(true);
+/// `true` late in `start_kernel`.
+static TASK_TABLE_AVAIL: AtomicBool = AtomicBool::new(false);
 
 pub const HUBRIS_FAULT_NOTIFICATION: u32 = 1;
 
@@ -85,7 +85,7 @@ pub unsafe fn start_kernel(tick_divisor: u32) -> ! {
     let first_task = crate::task::select(task_table.len() - 1, task_table);
 
     crate::arch::apply_memory_protection(first_task);
-    TASK_TABLE_IN_USE.store(false, Ordering::Release);
+    TASK_TABLE_AVAIL.store(true, Ordering::Release);
     crate::arch::start_first_task(tick_divisor, first_task)
 }
 
@@ -94,7 +94,7 @@ pub unsafe fn start_kernel(tick_divisor: u32) -> ! {
 /// To preserve uniqueness of the `&mut` reference passed into `body`, this
 /// function will detect any attempts to call it recursively and panic.
 pub(crate) fn with_task_table<R>(body: impl FnOnce(&mut [Task]) -> R) -> R {
-    if TASK_TABLE_IN_USE.swap_polyfill(true, Ordering::Acquire) {
+    if !TASK_TABLE_AVAIL.swap_polyfill(false, Ordering::Acquire) {
         panic!(); // recursive use of with_task_table
     }
     let task_table: *mut MaybeUninit<[Task; HUBRIS_TASK_COUNT]> =
@@ -108,7 +108,7 @@ pub(crate) fn with_task_table<R>(body: impl FnOnce(&mut [Task]) -> R) -> R {
     // MaybeUninit::array_assume_init, which at the time of this writing is not
     // stable.
     let task_table: *mut [Task; HUBRIS_TASK_COUNT] = task_table as _;
-    // Safety: we have observed `TASK_TABLE_IN_USE` being false, which means the
+    // Safety: we have observed `TASK_TABLE_AVAIL` being true, which means the
     // task table is initialized (note that at reset it starts out true) and
     // that we're not already within a call to with_task_table. Thus, we can
     // produce a reference to the task table without aliasing, and we can be
@@ -118,7 +118,7 @@ pub(crate) fn with_task_table<R>(body: impl FnOnce(&mut [Task]) -> R) -> R {
 
     let r = body(task_table);
 
-    TASK_TABLE_IN_USE.store(false, Ordering::Release);
+    TASK_TABLE_AVAIL.store(true, Ordering::Release);
 
     r
 }
