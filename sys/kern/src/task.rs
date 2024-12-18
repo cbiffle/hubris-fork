@@ -12,12 +12,15 @@ use abi::{
 };
 use zerocopy::FromBytes;
 
+use crate::arch::RegionDescExt;
 use crate::descs::{
     Priority, RegionAttributes, RegionDesc, TaskDesc, TaskFlags,
     REGIONS_PER_TASK,
 };
 use crate::err::UserError;
 use crate::startup::HUBRIS_FAULT_NOTIFICATION;
+use crate::startup::HUBRIS_REGION_DESCS;
+use crate::startup::HUBRIS_REGION_DESC_EXTS;
 use crate::time::Timestamp;
 use crate::umem::USlice;
 
@@ -218,7 +221,7 @@ impl Task {
 
         // Delegate the actual tests to the kerncore crate, but with our
         // attribute-sensing customization:
-        kerncore::can_access(slice, self.region_table(), |region| {
+        kerncore::can_access(slice, &self.region_table(), |region| {
             region.attributes.contains(desired)
                 && !region.attributes.intersects(forbidden)
         })
@@ -331,8 +334,22 @@ impl Task {
     }
 
     /// Returns a reference to the task's memory region descriptor table.
-    pub fn region_table(&self) -> &[&'static RegionDesc; REGIONS_PER_TASK] {
-        &self.descriptor.regions
+    pub fn region_table(&self) -> [&'static RegionDesc; REGIONS_PER_TASK] {
+        self.descriptor
+            .regions
+            .map(|idx| &HUBRIS_REGION_DESCS[idx as usize])
+    }
+
+    pub fn region_exts(
+        &self,
+    ) -> core::iter::Map<
+        core::slice::Iter<'_, u8>,
+        fn(&u8) -> &'static RegionDescExt,
+    > {
+        self.descriptor.regions.iter().map(|&idx|
+                // SAFETY: The indexes are given by the build system and are
+                // guaranteed to point to valid region indexes.
+                unsafe { HUBRIS_REGION_DESC_EXTS.get_unchecked(idx as usize) })
     }
 
     /// Returns this task's current generation number.

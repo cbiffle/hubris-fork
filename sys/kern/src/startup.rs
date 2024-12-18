@@ -5,7 +5,9 @@
 //! Kernel startup.
 
 use crate::atomic::AtomicExt;
-use crate::descs::{RegionAttributes, RegionDesc, TaskDesc, TaskFlags};
+use crate::descs::{
+    RegionAttributes, RegionDesc, RegionDescExt, TaskDesc, TaskFlags,
+};
 use crate::task::Task;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};

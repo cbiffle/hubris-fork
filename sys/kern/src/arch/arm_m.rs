@@ -466,8 +466,7 @@ pub fn apply_memory_protection(task: &task::Task) {
         mpu.ctrl.write(0);
     }
 
-    for (i, region) in task.region_table().iter().enumerate() {
-        let data = region.arch_data;
+    for (i, data) in task.region_exts().enumerate() {
         // With the MPU off, there are no particular constraints on the order in
         // which we write these fields.
         //

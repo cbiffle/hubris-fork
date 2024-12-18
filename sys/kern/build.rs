@@ -32,6 +32,7 @@ fn main() -> Result<()> {
 struct Generated {
     tasks: Vec<TokenStream>,
     regions: Vec<TokenStream>,
+    region_exts: Vec<TokenStream>,
     irq_code: TokenStream,
 }
 
@@ -179,9 +180,12 @@ fn process_config() -> Result<Generated> {
         } else {
             quote::quote! { TaskFlags::empty() }
         };
+        let regions = regions
+            .iter()
+            .map(|&idx| u8::try_from(idx).expect("Over 256 regions"));
         task_descs.push(quote::quote! {
             TaskDesc {
-                regions: [#(&HUBRIS_REGION_DESCS[#regions]),*],
+                regions: [#(#regions),*],
                 entry_point: #entry_point,
                 initial_stack: #initial_stack,
                 priority: #priority,
@@ -191,10 +195,10 @@ fn process_config() -> Result<Generated> {
         });
     }
 
-    let region_descs = region_table
+    let (region_descs, region_desc_exts) = region_table
         .into_iter()
         .map(|(_k, region)| fmt_region(&region))
-        .collect();
+        .collect::<(Vec<_>, Vec<_>)>();
 
     // Now, we generate two mappings:
     //  irq num => abi::Interrupt
@@ -330,6 +334,7 @@ fn process_config() -> Result<Generated> {
     Ok(Generated {
         tasks: task_descs,
         regions: region_descs,
+        region_exts: region_desc_exts,
         irq_code,
     })
 }
@@ -350,7 +355,7 @@ fn translate_address(
     region_table[&key].base + address.offset
 }
 
-fn fmt_region(region: &RegionConfig) -> TokenStream {
+fn fmt_region(region: &RegionConfig) -> (TokenStream, TokenStream) {
     let RegionConfig {
         base,
         size,
@@ -389,16 +394,20 @@ fn fmt_region(region: &RegionConfig) -> TokenStream {
         }
     };
 
-    quote::quote! {
-        RegionDesc {
-            base: #base,
-            size: #size,
-            attributes: #atts,
-            arch_data: crate::arch::compute_region_extension_data(
+    (
+        quote::quote! {
+            RegionDesc {
+                base: #base,
+                size: #size,
+                attributes: #atts,
+            }
+        },
+        quote::quote!(
+            crate::arch::compute_region_extension_data(
                 #base, #size, #atts,
-            ),
-        }
-    }
+            )
+        ),
+    )
 }
 
 fn generate_statics(gen: &Generated) -> Result<()> {
@@ -450,13 +459,17 @@ fn generate_statics(gen: &Generated) -> Result<()> {
     // Region descriptors
 
     let regions = &gen.regions;
+    let region_exts = &gen.region_exts;
     let region_count = regions.len();
     writeln!(
         file,
         "{}",
         quote::quote! {
-            static HUBRIS_REGION_DESCS: [RegionDesc; #region_count] = [
+            pub(crate) static HUBRIS_REGION_DESCS: [RegionDesc; #region_count] = [
                 #(#regions,)*
+            ];
+            pub(crate) static HUBRIS_REGION_DESC_EXTS: [RegionDescExt; #region_count] = [
+                #(#region_exts,)*
             ];
         },
     )?;
