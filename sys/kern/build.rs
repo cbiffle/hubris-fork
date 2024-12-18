@@ -180,9 +180,31 @@ fn process_config() -> Result<Generated> {
         } else {
             quote::quote! { TaskFlags::empty() }
         };
-        let regions = regions
-            .iter()
-            .map(|&idx| u8::try_from(idx).expect("Over 256 regions"));
+        let regions = if regions.len() <= 256 {
+            regions
+                .iter()
+                .map(|&idx| {
+                    let idx = u8::try_from(idx).unwrap();
+                    quote::quote! { RegionIndex::create(#idx) }
+                })
+                .collect::<Vec<_>>()
+        } else if regions.len() <= 65536 {
+            regions
+                .iter()
+                .map(|&idx| {
+                    let idx = u16::try_from(idx).unwrap();
+                    quote::quote! { RegionIndex::create(#idx) }
+                })
+                .collect::<Vec<_>>()
+        } else {
+            regions
+                .iter()
+                .map(|&idx| {
+                    let idx = u32::try_from(idx).unwrap();
+                    quote::quote! { RegionIndex::create(#idx) }
+                })
+                .collect::<Vec<_>>()
+        };
         task_descs.push(quote::quote! {
             TaskDesc {
                 regions: [#(#regions),*],
@@ -461,10 +483,19 @@ fn generate_statics(gen: &Generated) -> Result<()> {
     let regions = &gen.regions;
     let region_exts = &gen.region_exts;
     let region_count = regions.len();
+    let region_index_size: TokenStream = if region_count <= 256 {
+        "u8".parse().unwrap()
+    } else if region_count <= 65536 {
+        "u16".parse().unwrap()
+    } else {
+        "u32".parse().unwrap()
+    };
     writeln!(
         file,
         "{}",
         quote::quote! {
+            /// Type alias for indexing into HUBRIS_REGION statics.
+            type RegionIndexInner = #region_index_size;
             pub(crate) static HUBRIS_REGION_DESCS: [RegionDesc; #region_count] = [
                 #(#regions,)*
             ];

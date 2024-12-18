@@ -70,6 +70,8 @@
 //! context switches, and just always do full save/restore, eliminating PendSV.
 //! We'll see.
 
+use kerncore::MemoryRegion;
+
 use core::arch::{self, global_asm};
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 
@@ -313,8 +315,8 @@ pub fn reinitialize(task: &mut task::Task) {
         // occur, don't crash the entire system, since this is a diagnostic tool
         // -- just skip filling the stack.
         if let Ok(mut uslice) = USlice::<u32>::from_raw(
-            region.base as usize,
-            (initial_stack - frame_size - region.base as usize) >> 2,
+            region.base_addr(),
+            (initial_stack - frame_size - region.base_addr()) >> 2,
         ) {
             // This one, we're unwrapping rather than tolerating failure. This
             // is because try_write failing would indicate an invalid region
