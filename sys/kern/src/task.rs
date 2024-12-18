@@ -12,7 +12,6 @@ use abi::{
 };
 use zerocopy::FromBytes;
 
-use crate::arch::RegionDescExt;
 use crate::descs::{
     Priority, RegionAttributes, TaskDesc, TaskFlags, REGIONS_PER_TASK,
 };
@@ -219,9 +218,9 @@ impl Task {
         // Delegate the actual tests to the kerncore crate, but with our
         // attribute-sensing customization:
         kerncore::can_access(slice, self.region_table(), |region| {
-            let desc = region.get_desc();
-            desc.attributes.contains(desired)
-                && !desc.attributes.intersects(forbidden)
+            let region = region.get_desc();
+            region.attributes.contains(desired)
+                && !region.attributes.intersects(forbidden)
         })
     }
 
