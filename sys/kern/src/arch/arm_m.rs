@@ -468,7 +468,8 @@ pub fn apply_memory_protection(task: &task::Task) {
         mpu.ctrl.write(0);
     }
 
-    for (i, data) in task.region_exts().enumerate() {
+    for (i, region) in task.region_table().iter().enumerate() {
+        let data = region.get_ext();
         // With the MPU off, there are no particular constraints on the order in
         // which we write these fields.
         //
@@ -573,9 +574,8 @@ pub fn apply_memory_protection(task: &task::Task) {
     }
 
     for (i, region) in task.region_table().iter().enumerate() {
+        let ext = region.get_ext();
         let rnr = i as u32;
-
-        let ext = &region.arch_data;
 
         unsafe {
             let rlar_disabled = ext.rlar_disabled | (i as u32) << 1; // AttrIdx

@@ -336,15 +336,6 @@ impl Task {
         &self.descriptor.regions
     }
 
-    pub fn region_exts(
-        &self,
-    ) -> core::iter::Map<
-        core::slice::Iter<'_, RegionIndex>,
-        fn(&RegionIndex) -> &'static RegionDescExt,
-    > {
-        self.descriptor.regions.iter().map(|idx| idx.get_ext())
-    }
-
     /// Returns this task's current generation number.
     pub fn generation(&self) -> Generation {
         const MASK: u8 = ((1u32 << (16 - TaskId::INDEX_BITS)) - 1) as u8;
