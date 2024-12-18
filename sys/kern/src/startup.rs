@@ -19,6 +19,13 @@ use core::sync::atomic::{AtomicBool, Ordering};
 /// `true` late in `start_kernel`.
 static TASK_TABLE_AVAIL: AtomicBool = AtomicBool::new(false);
 
+/// The memory where the task table will be stored. This is sized in terms of
+/// the generated `HUBRIS_TASK_COUNT` constant, and is uninitialized until
+/// written later in this file.
+#[link_section = ".uninit"]
+static mut HUBRIS_TASK_TABLE_SPACE:
+    MaybeUninit<[crate::task::Task; HUBRIS_TASK_COUNT]> = MaybeUninit::uninit();
+
 pub const HUBRIS_FAULT_NOTIFICATION: u32 = 1;
 
 /// The main kernel entry point.
