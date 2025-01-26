@@ -180,7 +180,9 @@ fn process_config() -> Result<Generated> {
         } else {
             quote::quote! { TaskFlags::empty() }
         };
-        let regions = if regions.len() <= 256 {
+        let task_desc_ext =
+            generate_task_desc_ext(regions.as_ref(), &region_table);
+        let regions = if region_table.len() <= 256 {
             regions
                 .iter()
                 .map(|&idx| {
@@ -188,7 +190,7 @@ fn process_config() -> Result<Generated> {
                     quote::quote! { RegionIndex::create(#idx) }
                 })
                 .collect::<Vec<_>>()
-        } else if regions.len() <= 65536 {
+        } else if region_table.len() <= 65536 {
             regions
                 .iter()
                 .map(|&idx| {
@@ -208,6 +210,7 @@ fn process_config() -> Result<Generated> {
         task_descs.push(quote::quote! {
             TaskDesc {
                 regions: [#(#regions),*],
+                task_desc_ext: #task_desc_ext,
                 entry_point: #entry_point,
                 initial_stack: #initial_stack,
                 priority: #priority,
@@ -601,4 +604,44 @@ fn fmt_nested_perfect_hash_map<K, V>(
             values: &[#(#values,)*],
         }
     }
+}
+
+#[cfg(armv8m)]
+fn generate_task_desc_ext(
+    _: &[usize],
+    _: &IndexMap<RegionKey, RegionConfig>,
+) -> TokenStream {
+    quote::quote!(TaskDescExt {})
+}
+
+#[cfg(not(armv8m))]
+fn generate_task_desc_ext(
+    regions: &[usize],
+    region_table: &IndexMap<RegionKey, RegionConfig>,
+) -> TokenStream {
+    // We'll collect the MAIR register contents here. Indices 0-3 correspond to
+    // MAIR0's bytes (in LE order); 4-7 are MAIR1.
+    let mut mairs = [0; 8];
+    regions.iter().enumerate().for_each(|(index, &region)| {
+        let ratts = region_table[region].attributes;
+        let mair: u8 = match ratts.special_role {
+            Some(SpecialRole::Device) => {
+                // Most restrictive: device memory, outer shared.
+                0b00000000
+            }
+            Some(SpecialRole::Dma) => {
+                // Outer/inner non-cacheable, outer shared.
+                0b01000100
+            }
+            None => {
+                let rw = (ratts.read as u8) << 1 | (ratts.write as u8);
+                // write-back transient, not shared
+                0b0100_0100 | rw | rw << 4
+            }
+        };
+        mairs[index] = mair;
+    });
+    let mair0 = u32::from_le_bytes(mairs[..4].try_into().unwrap());
+    let mair1 = u32::from_le_bytes(mairs[4..].try_into().unwrap());
+    quote::quote!(TaskDescExt { mair0: #mair0, mair1: #mair1 })
 }

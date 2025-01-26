@@ -6,7 +6,8 @@
 
 use crate::atomic::AtomicExt;
 use crate::descs::{
-    RegionAttributes, RegionDesc, RegionDescExt, TaskDesc, TaskFlags,
+    RegionAttributes, RegionDesc, RegionDescExt, TaskDesc, TaskDescExt,
+    TaskFlags,
 };
 use crate::task::Task;
 use core::marker::PhantomData;

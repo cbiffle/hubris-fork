@@ -4,7 +4,7 @@
 
 //! Descriptor types, used to statically define application resources.
 
-pub(crate) use crate::arch::RegionDescExt;
+pub(crate) use crate::arch::{RegionDescExt, TaskDescExt};
 use crate::startup::RegionIndex;
 
 pub(crate) const REGIONS_PER_TASK: usize = 8;
@@ -43,6 +43,7 @@ pub struct TaskDesc {
     /// (This is why we use pointers into a table, to avoid making many copies
     /// of that region.)
     pub regions: [RegionIndex; REGIONS_PER_TASK],
+    pub task_desc_ext: TaskDescExt,
     /// Address of the task's entry point. This is the first instruction that
     /// will be executed whenever the task is (re)started. It must be within one
     /// of the task's memory regions (the kernel *will* check this).
