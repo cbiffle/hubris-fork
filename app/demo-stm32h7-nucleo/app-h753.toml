@@ -37,6 +37,7 @@ name = "drv-dac-server"
 priority = 2
 task-slots = ["sys"]
 features = ["h753"]
+uses = ["tim6", "dac"]
 start = true
 
 [tasks.sys.interrupts]

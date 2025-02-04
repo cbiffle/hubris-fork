@@ -133,6 +133,15 @@ address = 0x52002000
 size = 0x2000
 interrupts = { irq = 4 }
 
+[tim6]
+address = 0x40001000
+size = 0x400
+interrupts = { irq = 54 }
+
+[dac]
+address = 0x40007400
+size = 0x400
+
 [tim16]
 address = 0x40014400
 size = 0x400

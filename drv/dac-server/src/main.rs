@@ -13,7 +13,7 @@
 // use core::convert::TryInto;
 use userlib::*;
 
-use drv_stm32xx_sys_api as sys_api;
+use drv_stm32xx_sys_api::{self as sys_api, Peripheral};
 
 use idol_runtime::{
     ClientError, Leased, LenLimit, NotificationHandler, RequestError, R,
@@ -27,22 +27,19 @@ task_slot!(SYS, sys);
 
 pub struct Dac {
     reg: &'static device::dac::RegisterBlock,
-    gpioa: &'static device::gpioa::RegisterBlock,
-    rcc: &'static device::rcc::RegisterBlock,
+    sys: sys_api::Sys,
     tim6: &'static device::tim6::RegisterBlock,
 }
 
 impl Dac {
     pub fn new(
         reg: &'static device::dac::RegisterBlock,
-        gpioa: &'static device::gpioa::RegisterBlock,
-        rcc: &'static device::rcc::RegisterBlock,
+        sys: sys_api::Sys,
         tim6: &'static device::tim6::RegisterBlock,
     ) -> Self {
         Self {
             reg,
-            gpioa,
-            rcc,
+            sys,
             tim6,
         }
     }
@@ -68,12 +65,11 @@ fn main() -> ! {
     //hash_hw_reset();
 
     let reg = unsafe { &*device::DAC::ptr() };
-    let gpioa = unsafe { &*device::GPIOA::ptr() };
-    let rcc = unsafe { &*device::RCC::ptr() };
     let tim6 = unsafe { &*device::TIM6::ptr() };
 
 
-    let dac = Dac::new(reg, gpioa, rcc, tim6);
+    let sys = sys_api::Sys::from(SYS.get_task_id());
+    let dac = Dac::new(reg, sys, tim6);
 
     let mut buffer = [0; idl::INCOMING_SIZE];
     let mut server = ServerImpl {
@@ -103,15 +99,18 @@ impl idl::InOrderDacImpl for ServerImpl {
             //     .wave2().bits(0b11)
             // });
 
-            self.dac.gpioa.moder.modify(|_, w| {
-                w.moder4().alternate()
-            });
+            self.dac.sys.gpio_configure(
+                sys_api::Port::A,
+                1 << 4,
+                sys_api::Mode::Analog,
+                sys_api::OutputType::OpenDrain,
+                sys_api::Speed::Low,
+                sys_api::Pull::None,
+                sys_api::Alternate::AF0,
+            );
 
-
-            // self.dac.rcc.apb1lenr.modify(|_, w| {
-            //     w.dac12en().set_bit()
-            //     .tim6en().set_bit()
-            // });
+            self.dac.sys.enable_clock(Peripheral::Dac1);
+            self.dac.sys.enable_clock(Peripheral::Tim6);
 
             self.dac.tim6.arr.write(|w| {
                 w.bits(0xff)
