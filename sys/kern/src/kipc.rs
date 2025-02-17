@@ -253,6 +253,7 @@ fn get_task_dump_region(
             .iter()
             .filter(|r| r.dumpable())
             .nth(rindex as usize - 1)
+            .map(|r| r.get_desc())
             .map(|r| abi::TaskDumpRegion {
                 base: r.base,
                 size: r.size,

@@ -70,6 +70,8 @@
 //! context switches, and just always do full save/restore, eliminating PendSV.
 //! We'll see.
 
+use kerncore::MemoryRegion;
+
 use core::arch::{self, global_asm};
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 
@@ -330,8 +332,8 @@ pub fn reinitialize(task: &mut task::Task) {
         // occur, don't crash the entire system, since this is a diagnostic tool
         // -- just skip filling the stack.
         if let Ok(mut uslice) = USlice::<u32>::from_raw(
-            region.base as usize,
-            (initial_stack - frame_size - region.base as usize) >> 2,
+            region.base_addr(),
+            (initial_stack - frame_size - region.base_addr()) >> 2,
         ) {
             // This one, we're unwrapping rather than tolerating failure. This
             // is because try_write failing would indicate an invalid region
@@ -484,7 +486,7 @@ pub fn apply_memory_protection(task: &task::Task) {
     }
 
     for (i, region) in task.region_table().iter().enumerate() {
-        let data = region.arch_data;
+        let data = region.get_ext();
         // With the MPU off, there are no particular constraints on the order in
         // which we write these fields.
         //
@@ -524,10 +526,24 @@ pub struct RegionDescExt {
 
     /// Contents of the RLAR register.
     rlar: u32,
-
-    /// This region's portion of the four-byte MAIR register.
-    mair: u8,
 }
+
+/// ARMv8-M specific MPU accelerator data.
+#[cfg(armv8m)]
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub struct TaskDescExt {
+    pub(crate) mair0: u32,
+    pub(crate) mair1: u32,
+}
+
+/// Architecture-specific task descriptor data.
+///
+/// In the generic case, no architecture specific data exists.
+#[cfg(not(armv8m))]
+#[derive(Copy, Clone, Debug, Default)]
+#[repr(transparent)]
+pub struct TaskDescExt {}
 
 #[cfg(armv8m)]
 pub const fn compute_region_extension_data(
@@ -554,17 +570,14 @@ pub const fn compute_region_extension_data(
         0b00 // RW by privilege code only
     };
 
-    let (mair, sh) = if ratts.contains(RegionAttributes::DEVICE) {
-        // Most restrictive: device memory, outer shared.
-        (0b00000000, 0b10)
-    } else if ratts.contains(RegionAttributes::DMA) {
-        // Outer/inner non-cacheable, outer shared.
-        (0b01000100, 0b10)
+    let sh = if ratts.contains(RegionAttributes::DEVICE)
+        || ratts.contains(RegionAttributes::DMA)
+    {
+        // Outer shared.
+        0b10
     } else {
-        let rw = (ratts.contains(RegionAttributes::READ) as u8) << 1
-            | (ratts.contains(RegionAttributes::WRITE) as u8);
-        // write-back transient, not shared
-        (0b0100_0100 | rw | rw << 4, 0b00)
+        // Not shared.
+        0b00
     };
 
     // RLAR = our upper bound. We're going ahead and setting the enable bit
@@ -579,7 +592,7 @@ pub const fn compute_region_extension_data(
         | ap << 1
         | (sh as u32) << 3  // sharability
         | base;
-    RegionDescExt { rlar, rbar, mair }
+    RegionDescExt { rlar, rbar }
 }
 
 #[cfg(armv8m)]
@@ -604,16 +617,9 @@ pub fn apply_memory_protection(task: &task::Task) {
         disable_mpu(mpu);
     }
 
-    // We'll collect the MAIR register contents here. Indices 0-3 correspond to
-    // MAIR0's bytes (in LE order); 4-7 are MAIR1.
-    let mut mairs = [0; 8];
-
     for (i, region) in task.region_table().iter().enumerate() {
+        let ext = region.get_ext();
         let rnr = i as u32;
-
-        let ext = &region.arch_data;
-
-        mairs[i] = ext.mair;
 
         // Set the attridx field of the RLAR to just choose the attributes with
         // the same index as the region. This lets us treat MAIR as an array
@@ -633,8 +639,9 @@ pub fn apply_memory_protection(task: &task::Task) {
 
     unsafe {
         // Load the MAIR registers.
-        mpu.mair[0].write(u32::from_le_bytes(mairs[..4].try_into().unwrap()));
-        mpu.mair[1].write(u32::from_le_bytes(mairs[4..].try_into().unwrap()));
+        let ext = &task.descriptor().task_desc_ext;
+        mpu.mair[0].write(ext.mair0);
+        mpu.mair[1].write(ext.mair1);
         enable_mpu(mpu, true);
     }
 }

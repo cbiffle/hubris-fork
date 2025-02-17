@@ -4,6 +4,9 @@
 
 //! Descriptor types, used to statically define application resources.
 
+pub(crate) use crate::arch::{RegionDescExt, TaskDescExt};
+use crate::startup::RegionIndex;
+
 pub(crate) const REGIONS_PER_TASK: usize = 8;
 
 /// Indicates priority of a task.
@@ -39,7 +42,8 @@ pub struct TaskDesc {
     /// no access; by convention, this region is usually entry 0 in the table.
     /// (This is why we use pointers into a table, to avoid making many copies
     /// of that region.)
-    pub regions: [&'static RegionDesc; REGIONS_PER_TASK],
+    pub regions: [RegionIndex; REGIONS_PER_TASK],
+    pub task_desc_ext: TaskDescExt,
     /// Address of the task's entry point. This is the first instruction that
     /// will be executed whenever the task is (re)started. It must be within one
     /// of the task's memory regions (the kernel *will* check this).
@@ -87,10 +91,9 @@ bitflags::bitflags! {
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub struct RegionDesc {
-    /// Architecture-specific additional data to make context switch cheaper.
-    /// Should be first in the struct to improve context switch code generation.
-    pub arch_data: crate::arch::RegionDescExt,
-
+    // Architecture-specific additional data to make context switch cheaper.
+    // Should be first in the struct to improve context switch code generation.
+    // pub arch_data: crate::arch::RegionDescExt,
     /// Address of start of region. The platform likely has alignment
     /// requirements for this; it must meet them. (For example, on ARMv7-M, it
     /// must be naturally aligned for the size.)
@@ -147,6 +150,23 @@ impl kerncore::MemoryRegion for RegionDesc {
     #[inline(always)]
     fn end_addr(&self) -> usize {
         self.end_addr() as usize
+    }
+}
+
+impl kerncore::MemoryRegion for RegionIndex {
+    #[inline(always)]
+    fn contains(&self, addr: usize) -> bool {
+        self.get_desc().contains(addr)
+    }
+
+    #[inline(always)]
+    fn base_addr(&self) -> usize {
+        self.get_desc().base_addr() as usize
+    }
+
+    #[inline(always)]
+    fn end_addr(&self) -> usize {
+        self.get_desc().end_addr() as usize
     }
 }
 

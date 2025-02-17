@@ -32,6 +32,7 @@ fn main() -> Result<()> {
 struct Generated {
     tasks: Vec<TokenStream>,
     regions: Vec<TokenStream>,
+    region_exts: Vec<TokenStream>,
     irq_code: TokenStream,
 }
 
@@ -179,9 +180,37 @@ fn process_config() -> Result<Generated> {
         } else {
             quote::quote! { TaskFlags::empty() }
         };
+        let task_desc_ext =
+            generate_task_desc_ext(regions.as_ref(), &region_table);
+        let regions = if region_table.len() <= 256 {
+            regions
+                .iter()
+                .map(|&idx| {
+                    let idx = u8::try_from(idx).unwrap();
+                    quote::quote! { RegionIndex::create(#idx) }
+                })
+                .collect::<Vec<_>>()
+        } else if region_table.len() <= 65536 {
+            regions
+                .iter()
+                .map(|&idx| {
+                    let idx = u16::try_from(idx).unwrap();
+                    quote::quote! { RegionIndex::create(#idx) }
+                })
+                .collect::<Vec<_>>()
+        } else {
+            regions
+                .iter()
+                .map(|&idx| {
+                    let idx = u32::try_from(idx).unwrap();
+                    quote::quote! { RegionIndex::create(#idx) }
+                })
+                .collect::<Vec<_>>()
+        };
         task_descs.push(quote::quote! {
             TaskDesc {
-                regions: [#(&HUBRIS_REGION_DESCS[#regions]),*],
+                regions: [#(#regions),*],
+                task_desc_ext: #task_desc_ext,
                 entry_point: #entry_point,
                 initial_stack: #initial_stack,
                 priority: #priority,
@@ -191,10 +220,10 @@ fn process_config() -> Result<Generated> {
         });
     }
 
-    let region_descs = region_table
+    let (region_descs, region_desc_exts) = region_table
         .into_iter()
         .map(|(_k, region)| fmt_region(&region))
-        .collect();
+        .collect::<(Vec<_>, Vec<_>)>();
 
     // Now, we generate two mappings:
     //  irq num => abi::Interrupt
@@ -330,6 +359,7 @@ fn process_config() -> Result<Generated> {
     Ok(Generated {
         tasks: task_descs,
         regions: region_descs,
+        region_exts: region_desc_exts,
         irq_code,
     })
 }
@@ -350,7 +380,7 @@ fn translate_address(
     region_table[&key].base + address.offset
 }
 
-fn fmt_region(region: &RegionConfig) -> TokenStream {
+fn fmt_region(region: &RegionConfig) -> (TokenStream, TokenStream) {
     let RegionConfig {
         base,
         size,
@@ -389,16 +419,20 @@ fn fmt_region(region: &RegionConfig) -> TokenStream {
         }
     };
 
-    quote::quote! {
-        RegionDesc {
-            base: #base,
-            size: #size,
-            attributes: #atts,
-            arch_data: crate::arch::compute_region_extension_data(
+    (
+        quote::quote! {
+            RegionDesc {
+                base: #base,
+                size: #size,
+                attributes: #atts,
+            }
+        },
+        quote::quote!(
+            crate::arch::compute_region_extension_data(
                 #base, #size, #atts,
-            ),
-        }
-    }
+            )
+        ),
+    )
 }
 
 fn generate_statics(gen: &Generated) -> Result<()> {
@@ -446,13 +480,26 @@ fn generate_statics(gen: &Generated) -> Result<()> {
     // Region descriptors
 
     let regions = &gen.regions;
+    let region_exts = &gen.region_exts;
     let region_count = regions.len();
+    let region_index_size: TokenStream = if region_count <= 256 {
+        "u8".parse().unwrap()
+    } else if region_count <= 65536 {
+        "u16".parse().unwrap()
+    } else {
+        "u32".parse().unwrap()
+    };
     writeln!(
         file,
         "{}",
         quote::quote! {
-            static HUBRIS_REGION_DESCS: [RegionDesc; #region_count] = [
+            /// Type alias for indexing into HUBRIS_REGION statics.
+            type RegionIndexInner = #region_index_size;
+            pub(crate) static HUBRIS_REGION_DESCS: [RegionDesc; #region_count] = [
                 #(#regions,)*
+            ];
+            pub(crate) static HUBRIS_REGION_DESC_EXTS: [RegionDescExt; #region_count] = [
+                #(#region_exts,)*
             ];
         },
     )?;
@@ -553,4 +600,44 @@ fn fmt_nested_perfect_hash_map<K, V>(
             values: &[#(#values,)*],
         }
     }
+}
+
+#[cfg(armv8m)]
+fn generate_task_desc_ext(
+    _: &[usize],
+    _: &IndexMap<RegionKey, RegionConfig>,
+) -> TokenStream {
+    quote::quote!(TaskDescExt {})
+}
+
+#[cfg(not(armv8m))]
+fn generate_task_desc_ext(
+    regions: &[usize],
+    region_table: &IndexMap<RegionKey, RegionConfig>,
+) -> TokenStream {
+    // We'll collect the MAIR register contents here. Indices 0-3 correspond to
+    // MAIR0's bytes (in LE order); 4-7 are MAIR1.
+    let mut mairs = [0; 8];
+    regions.iter().enumerate().for_each(|(index, &region)| {
+        let ratts = region_table[region].attributes;
+        let mair: u8 = match ratts.special_role {
+            Some(SpecialRole::Device) => {
+                // Most restrictive: device memory, outer shared.
+                0b00000000
+            }
+            Some(SpecialRole::Dma) => {
+                // Outer/inner non-cacheable, outer shared.
+                0b01000100
+            }
+            None => {
+                let rw = (ratts.read as u8) << 1 | (ratts.write as u8);
+                // write-back transient, not shared
+                0b0100_0100 | rw | rw << 4
+            }
+        };
+        mairs[index] = mair;
+    });
+    let mair0 = u32::from_le_bytes(mairs[..4].try_into().unwrap());
+    let mair1 = u32::from_le_bytes(mairs[4..].try_into().unwrap());
+    quote::quote!(TaskDescExt { mair0: #mair0, mair1: #mair1 })
 }

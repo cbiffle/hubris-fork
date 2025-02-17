@@ -5,8 +5,12 @@
 //! Kernel startup.
 
 use crate::atomic::AtomicExt;
-use crate::descs::{RegionAttributes, RegionDesc, TaskDesc, TaskFlags};
+use crate::descs::{
+    RegionAttributes, RegionDesc, RegionDescExt, TaskDesc, TaskDescExt,
+    TaskFlags,
+};
 use crate::task::Task;
+use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -129,6 +133,52 @@ pub(crate) fn with_task_table<R>(body: impl FnOnce(&mut [Task]) -> R) -> R {
     TASK_TABLE_AVAIL.store(true, Ordering::Release);
 
     r
+}
+
+// Newtype idenfitying a memory region in the Hubris application by index.
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+pub struct RegionIndex(
+    // Actual index: The bit width of the index is decided by kconfig.rs using
+    // a type alias.
+    RegionIndexInner,
+    // The index can be used to index into the region descriptors.
+    //
+    // Note that this PhantomData has no effect anywhere, and serves only to
+    // document.
+    PhantomData<&'static RegionDesc>,
+    // The index can be used to index into the region descriptor's architecture
+    // specific data.
+    //
+    // Note that this PhantomData has no effect anywhere, and serves only to
+    // document.
+    PhantomData<&'static RegionDescExt>,
+);
+
+impl RegionIndex {
+    /// Const-only function to create a RegionIndex. No other construction
+    /// method is allowed. This ensures that indexing by RegionIndex is always
+    /// safe and needs no bounds checks.
+    const fn create(value: RegionIndexInner) -> Self {
+        Self(value, PhantomData, PhantomData)
+    }
+
+    #[inline]
+    pub(crate) fn get_desc(self) -> &'static RegionDesc {
+        // SAFETY: RegionIndex is guaranteed to point to a valid region.
+        unsafe { HUBRIS_REGION_DESCS.get_unchecked(self.0 as usize) }
+    }
+
+    #[inline]
+    pub(crate) fn get_ext(self) -> &'static RegionDescExt {
+        // SAFETY: RegionIndex is guaranteed to point to a valid region.
+        unsafe { HUBRIS_REGION_DESC_EXTS.get_unchecked(self.0 as usize) }
+    }
+
+    #[inline]
+    pub(crate) fn dumpable(self) -> bool {
+        self.get_desc().dumpable()
+    }
 }
 
 include!(concat!(env!("OUT_DIR"), "/kconfig.rs"));
